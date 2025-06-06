@@ -1,0 +1,63 @@
+// Detecting Deforestation using Landsat and NDVI in GEE
+
+// Define Area of Interest (AOI)
+var AOI = ee.Geometry.Polygon([
+  [[-60, -10], [-60, 0], [-50, 0], [-50, -10], [-60, -10]]
+]);
+
+// Define time periods
+var start1 = '2015-01-01';
+var end1 = '2015-12-31';
+var start2 = '2024-01-01';
+var end2 = '2024-12-31';
+
+// Load Landsat 8 Image Collections for both periods
+var collection1 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .filterDate(start1, end1)
+  .filterBounds(AOI)
+  .filter(ee.Filter.lt('CLOUD_COVER', 20));
+
+var collection2 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+  .filterDate(start2, end2)
+  .filterBounds(AOI)
+  .filter(ee.Filter.lt('CLOUD_COVER', 20));
+
+// Function to calculate NDVI
+function getNDVI(image) {
+  return image.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI');
+}
+
+// Calculate median composite and NDVI for each period
+var ndvi1 = collection1.median().clip(AOI).map(getNDVI);
+var ndvi2 = collection2.median().clip(AOI).map(getNDVI);
+
+// Because map() over single images returns empty, just compute manually
+var ndviImage1 = getNDVI(collection1.median().clip(AOI));
+var ndviImage2 = getNDVI(collection2.median().clip(AOI));
+
+// Compute NDVI difference
+var ndviChange = ndviImage2.subtract(ndviImage1).rename('NDVI_Change');
+
+// Set threshold for deforestation (e.g., NDVI decrease > 0.2)
+var deforestation = ndviChange.lt(-0.2);
+
+// Visualization parameters
+var ndviParams = {min: 0, max: 1, palette: ['white', 'green']};
+var diffParams = {min: -0.5, max: 0.5, palette: ['red', 'white', 'green']};
+var deforestationParams = {palette: ['red']};
+
+// Add Layers to Map
+Map.centerObject(AOI, 6);
+Map.addLayer(ndviImage1, ndviParams, 'NDVI 2015');
+Map.addLayer(ndviImage2, ndviParams, 'NDVI 2024');
+Map.addLayer(ndviChange, diffParams, 'NDVI Change');
+Map.addLayer(deforestation.updateMask(deforestation), deforestationParams, 'Deforestation Areas');
+
+// Export deforestation map to Google Drive
+Export.image.toDrive({
+  image: deforestation,
+  description: 'Deforestation_Detection',
+  scale: 30,
+  region: AOI,
+  maxPixels: 1e13
+});
